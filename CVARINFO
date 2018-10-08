@@ -1,0 +1,4 @@
+server int sv_lobby_mapnum = -1;
+
+user int qc_duel_champ_max = 5;
+user string qcd_champ = "";

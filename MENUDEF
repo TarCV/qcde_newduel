@@ -1,0 +1,60 @@
+OptionMenu "QCDEOptions"
+{
+	Title 			"QCDE OPTIONS"
+	StaticText 	"QCDE Keybinds",1
+	Control "Use Active Ability",     "+QCDE_ActiveAbility"
+	Control "Use (New duels only)",     "+qcduel_use"
+	Control "Select Starting Weapon", "+QCDE_StartingWeapon"
+	Control "Champion information",   "+QCDE_ClassInfo"
+	Submenu 	"Weapon Binding",     "QCDEWeaponBinds"
+	StaticText 	""
+	Option "Starting Weapon",         "cl_startingWeapon", "StartingWeapon"
+	StaticText 	""
+	StaticText 	"Monster Set Selection",1
+	Option    "quake 1", "theme0", "YesNo"
+	Option    "quake 2", "theme1", "YesNo"
+	Option    "quake 4", "theme2", "YesNo"
+	Option       "doom", "theme3", "YesNo"
+	Option  "doom 2016", "theme4", "YesNo"
+	StaticText 	""
+	Option  "Shuffle Mode"  , "qc_shuffleMode",   "ShuffleMode"
+	Option  "Skirmish Rogue", "qc_skirmishRogue", "YesNo"
+	Submenu "Custom themes (if loaded)", "QCDECustomThemes"
+	StaticText 	""
+	StaticText 	""
+	StaticText 	""
+	StaticText 	""
+	StaticText 	"-  -  -  -  -  -  Advanced settings  -  -  -  -  -  -",1
+	StaticText 	""
+	StaticText 	""
+	Submenu 	"GZdoom Shortcuts",		"GZDShortcuts"
+	StaticText 	""
+	StaticText 	"Gameplay Settings",1
+	Option "Auto-Open Lootboxes",     "cl_autoOpenLootboxes",  "OnOff"
+	Option "Damage Numbers",          "sv_ShowDamageNumbers",  "OnOff"
+	Slider "Player Speed Percentage", "sv_PlayerSpeed",        70, 130, 5
+	StaticText 	""
+	StaticText 	"HUD",1
+	Option "Crosshair Type",			"crosshair",           "Crosshairs"
+	Option "Speedometer",				"cl_speedometer",      "OnOff"
+	Option "Weapon bar (16:9)",			"cl_showWeaponBar",    "OnOff"
+	Option "Low ammo warning",			"cl_lowAmmoWarning",   "LowWarning"
+	Option "Low health warning",		"cl_lowHealthWarning", "LowWarning"
+	Option "Cooperative markers",		"cl_allyMarkers",      "OnOff"
+	Slider "Spectator scoreboard size",	"cl_specScores",       0, 64, 1
+	StaticText 	""
+	StaticText 	"Visual",1
+	Option "Blood Smears",         "cl_ShowHUDBloodSmears", "OnOff"
+	Option "LG Beam Transparency", "cl_lgtransparency",     "LGTransp"
+	Option "Weapon Firing Recoil", "cl_weaponrecoil",       "OnOff"
+	Option "Weapon Firing Flash",  "cl_weaponfireflash",    "OnOff"
+	StaticText 	""
+	StaticText 	"Sound",1
+	Option "Weapon hit-beeps",			"cl_hitbeep",				"OnOff"
+	Slider "Taunt chance",				"cl_autoTaunt", 			  0, 50, 1
+	StaticText ""
+	StaticText "Per-champion settings",1
+	Slider "Inquisitor/Lo Wang tap time", "cl_clutchTapMax",  1, 35, 1
+	Option "Eradicator Radar mode",       "cl_radarMode",    "RadarMode"
+	StaticText ""
+}

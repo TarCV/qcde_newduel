@@ -1,0 +1,152 @@
+// ----------------------------------------------------------------------------
+//
+// Effectively remove player from the game
+// while he/she/it drafts champions, selects champion
+// or when he/she/it activated wrong player class
+//
+// Based on Nyx Active by QC:DE developers
+//
+// ----------------------------------------------------------------------------
+
+Actor QCDToken : Inventory { +INVENTORY.UNDROPPABLE }
+Actor QCDNeutralizePlayerToken : QCDToken {}
+Actor QCDActivatedPlayerToken : QCDToken {}
+Actor QCDFrozenPlayerToken : QCDToken {}
+Actor QCDUnfrozenPlayerToken : QCDToken {}
+
+Actor NeutralizePlayer : CustomInventory
+{
+	States
+	{
+	Pickup:
+		TNT1 A 0 A_Print("Got NeutralizePlayer")
+		TNT1 A 0 A_TakeInventory("QCDActivatedPlayerToken",999)
+		TNT1 A 0 A_GiveInventory("QCDNeutralizePlayerToken",1)
+		TNT1 A 0 A_GiveInventory("QCDNeutralizePlayerEffect",1)
+		TNT1 A 35 
+		Stop
+	}
+}
+
+Actor QCDNeutralizePlayerEffect : CustomInventory {
+	States
+	{
+	Pickup:
+		TNT1 A 0 A_Print("Got NeutralizePlayerEffect")
+		TNT1 A 0 A_GiveInventory("QCDFrozenPlayer",1)
+		TNT1 A 0 A_ChangeFlag("NOINTERACTION", 1)
+		TNT1 A 0 A_ChangeVelocity(0, 0, 0)
+		TNT1 A 0 A_ChangeFlag("Solid",0)
+		TNT1 A 0 A_ChangeFlag("NOTARGET",1)
+		TNT1 A 0 A_ChangeFlag("THRUACTORS",1)
+		TNT1 A 0 A_GiveInventory("QCDNeutralizedPlayerTint",1)
+		TNT1 A 0 A_GiveInventory("NoWeaponFireToken",1)
+		TNT1 A 0 A_GiveInventory("NoFootstepsToken",1)
+		TNT1 A 0 A_StopSound(5)
+		TNT1 A 0 A_StopSound(6)
+		TNT1 A 0 A_StopSound(CHAN_WEAPON)
+		TNT1 A 0 A_ClearSoundTarget
+		TNT1 A 0 A_RadiusGive("GhostWalkForgetter",2048,RGF_MONSTERS)
+		TNT1 A 0 A_SetTranslucent(0.0)
+		TNT1 A 35 
+		Stop
+	}
+}
+ACTOR QCDNeutralizedPlayerTint : PowerupGiver
+{
+	+INVENTORY.AUTOACTIVATE
+	+INVENTORY.ALWAYSPICKUP
+	Powerup.Colormap 0,0,0, .5,.1,.5
+	Powerup.Duration 0x7FFFFFFD
+	Powerup.Type "GhostTint"
+}
+
+Actor QCDActivatedPlayer : CustomInventory
+{
+	States
+	{
+	Pickup:
+		TNT1 A 0 A_Print("Got ActivatedPlayer")
+		TNT1 A 0 A_TakeInventory("QCDNeutralizePlayerToken", 999)
+		TNT1 A 0 A_GiveInventory("QCDActivatedPlayerToken",1)
+		TNT1 A 0 A_GiveInventory("QCDUnfrozenPlayer", 1)
+		TNT1 A 35
+		Stop
+	}
+}
+
+Actor QCDFrozenPlayer : CustomInventory
+{
+	States
+	{
+	Pickup:
+		TNT1 A 0 A_Print("Got FrozenPlayer")
+		TNT1 A 0 A_TakeInventory("QCDUnfrozenPlayerToken", 999)
+		TNT1 A 0 A_GiveInventory("QCDFrozenPlayerToken",1)
+		TNT1 A 0 SetPlayerProperty(0, 1, PROP_FROZEN)
+		TNT1 A 0 SetPlayerProperty(0, 1, PROP_TOTALLYFROZEN)
+		TNT1 A 35 
+		Stop
+	}
+}
+Actor QCDUnfrozenPlayer : CustomInventory
+{
+	States
+	{
+	Pickup:
+		TNT1 A 0 A_Print("Got UnfrozenPlayer")
+		TNT1 A 0 A_TakeInventory("QCDFrozenPlayerToken", 999)
+		TNT1 A 0 A_GiveInventory("QCDUnfrozenPlayerToken", 1)
+		TNT1 A 0 SetPlayerProperty(0, 0, PROP_FROZEN)
+		TNT1 A 0 SetPlayerProperty(0, 0, PROP_TOTALLYFROZEN)
+		TNT1 A 35
+		Stop
+	}
+}
+
+// ----------------------------------------------------------------------------
+//
+// A certifate that a player spawned as an allowed class
+// and thus has all right to bring destruction around
+//
+// ----------------------------------------------------------------------------
+Actor LicenseToKill : CustomInventory
+{
+}
+
+// ----------------------------------------------------------------------------
+//
+// Player killer that does not affect frags
+//
+// ----------------------------------------------------------------------------
+ACTOR PlayerKiller
+{
+	Health 1
+	Radius 1
+	Height 1
+	Mass 0
+	Speed 0
+	Monster
+	-SOLID
+	+NOINTERACTION
+	+NOTARGET
+	+THRUACTORS
+	States
+	{
+	Spawn:
+		TNT1 A 1
+		Loop
+	}
+}
+ACTOR PlayerRemover : PlayerKiller
+{
+	Obituary "%o is removed from the game"
+}
+ACTOR PlayerReintroducer : PlayerKiller
+{
+	Obituary "%o is reintroduced to the game"
+}
+DamageType PlayerRemoved
+{
+	NoArmor
+}

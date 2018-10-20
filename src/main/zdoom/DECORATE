@@ -150,3 +150,17 @@ DamageType PlayerRemoved
 {
 	NoArmor
 }
+
+/**TEST_ONLY
+class NoWeaponFireToken extends QCDToken {
+    NoWeaponFireToken(Simulation simulation) {
+        super(simulation);
+    }
+}
+
+class NoFootstepsToken extends QCDToken {
+    NoFootstepsToken(Simulation simulation) {
+        super(simulation);
+    }
+}
+**/

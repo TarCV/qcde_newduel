@@ -1,0 +1,66 @@
+buildscript {
+    repositories {
+        maven { url 'https://jitpack.io' }
+    }
+    dependencies {
+        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.1.1'
+        classpath 'com.github.TarCV:ztest:master-SNAPSHOT'
+    }
+}
+
+plugins {
+    id 'java'
+    id 'idea'
+}
+
+apply plugin: 'com.github.tarcv.ztest.plugin'
+
+group 'com.github.tarcv.qcde-newduel'
+version '0.1-SNAPSHOT'
+
+sourceCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+}
+
+ext.junitJupiterVersion = '5.2.0'
+ext.jqwikVersion = '0.8.15'
+
+configurations {
+    quasar
+}
+
+dependencies {
+    testCompile 'com.github.tarcv.ztest:simulation'
+
+    testCompile 'net.jcip:jcip-annotations:1.0'
+    testCompile 'org.jetbrains:annotations:16.0.3'
+    testCompile 'co.paralleluniverse:quasar-core:0.7.10:jdk8'
+    quasar 'co.paralleluniverse:quasar-core:0.7.10:jdk8'
+
+    testCompile("org.junit.jupiter:junit-jupiter-api:${junitJupiterVersion}")
+    testCompile("org.junit.jupiter:junit-jupiter-params:${junitJupiterVersion}")
+    testRuntime("org.junit.jupiter:junit-jupiter-engine:${junitJupiterVersion}")
+//    testCompile("org.junit.platform:junit-platform-launcher:${junitJupiterVersion}")
+    testCompile "net.jqwik:jqwik:${jqwikVersion}"
+    testCompile("org.assertj:assertj-core:3.9.1")
+}
+
+compileTestJava.dependsOn processTestResources
+compileTestJava {
+    doLast {
+        ant.taskdef(name:'instrumentation', classname:'co.paralleluniverse.fibers.instrument.InstrumentationTask', classpath: configurations.testCompile.asPath)
+        ant.instrumentation(verbose:'true', check:'true', debug:'true') {
+            fileset(dir: sourceSets.test.output.classesDir)
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+    jvmArgs "-javaagent:${configurations.quasar.iterator().next()}"
+}

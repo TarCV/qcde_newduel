@@ -1,4 +1,4 @@
-alias +qcduel_use "pukename QCDE_Duel_Use always 1;playerclass $qcd_champ;+use"
-alias -qcduel_use "-use; pukename QCDE_Duel_Use always 0"
+alias +qcduel_use "pukename QCD_Use always 1;playerclass $qcd_champ;+use"
+alias -qcduel_use "-use; pukename QCD_Use always 0"
 addmenukey "Duel specific use" +qcduel_use
 defaultbind g +qcduel_use

@@ -13,8 +13,11 @@ Actor QCDNeutralizePlayerToken : QCDToken {}
 Actor QCDActivatedPlayerToken : QCDToken {}
 Actor QCDFrozenPlayerToken : QCDToken {}
 Actor QCDUnfrozenPlayerToken : QCDToken {}
+Actor QCDRespawnFinished : QCDToken {}
+Actor QCDScore1 : QCDToken { Inventory.MaxAmount 220 }
+Actor QCDScore2 : QCDToken { Inventory.MaxAmount 220 }
 
-Actor NeutralizePlayer : CustomInventory
+Actor QCDNeutralizePlayer : CustomInventory
 {
 	States
 	{
@@ -34,7 +37,7 @@ Actor QCDNeutralizePlayerEffect : CustomInventory {
 	Pickup:
 		TNT1 A 0 A_Print("Got NeutralizePlayerEffect")
 		TNT1 A 0 A_GiveInventory("QCDFrozenPlayer",1)
-		TNT1 A 0 A_ChangeFlag("NOINTERACTION", 1)
+//		TNT1 A 0 A_ChangeFlag("NOINTERACTION", 1)
 		TNT1 A 0 A_ChangeVelocity(0, 0, 0)
 		TNT1 A 0 A_ChangeFlag("Solid",0)
 		TNT1 A 0 A_ChangeFlag("NOTARGET",1)

@@ -7,6 +7,11 @@
 #libdefine TICSPERSECOND 35
 #libdefine USE_KEY "+qcduel_use"
 
+global str 12:score1[];
+global str 13:score2[];
+global str 16:name1[];
+global str 17:name2[];
+
 world int 88:chosenClass[];
 world int 87:duelPlayers[];
 
@@ -15,7 +20,8 @@ world int 86:roundActive;
 #libdefine ROUND_PREDRAFT 1
 #libdefine ROUND_DRAFTING 2
 #libdefine ROUND_WARMUP 3
-#libdefine ROUND_STARTED 4
+#libdefine ROUND_PRESELECT_CHAMP 4
+#libdefine ROUND_STARTED 5
 #libdefine ROUND_ILLEGAL_STATE -1
 
 
@@ -25,6 +31,7 @@ int champStatus[MAXMATES][2];
 #libdefine STATUS_DEAD 2
 
 #libdefine AFTER_DRAFTING_PAUSE 3
+#libdefine PRESELECT_TIME 10
 
 #libdefine ITEM_ACTIVATED "QCDActivatedPlayer"
 #libdefine ITEM_ACTIVATED_TOKEN "QCDActivatedPlayerToken"
@@ -33,6 +40,7 @@ int champStatus[MAXMATES][2];
 #libdefine ITEM_FROZEN "QCDFrozenPlayer"
 #libdefine ITEM_NOTFROZEN "QCDUnfrozenPlayer"
 #libdefine ITEM_NOTFROZEN_TOKEN "QCDUnfrozenPlayerToken"
+#libdefine ITEM_RESPAWN_FINISHED "QCDRespawnFinished"
 
 int champDraftingTime = 10;
 bool pressedUse[2];
@@ -109,96 +117,277 @@ int champ_buttons[MAXMATES] = {BT_MOVELEFT, BT_FORWARD, BT_MOVERIGHT, BT_BACK, B
 #libdefine ON_OPEN 0
 #libdefine ON_PLAYERS_PRESENT 1
 #libdefine ON_PLAYERS_DRAFTED 2
-#libdefine ON_ROUND_STARTED 3
+//#libdefine ON_ROUND_STARTED 3
 #libdefine ON_ROUND_FINISHED 4
 #libdefine ON_ROUND_ABORTED 5
+#libdefine ON_WARMUP_FINISHED 6
+#libdefine ON_PLAYER_DEATH 7
 
 
 bool draftReady[2];
 int whoDraftsNow = -1;
 int whoDraftsFirst = 0;
+int timeStarted = -1;
 
-Script "QCDE_Duel_Event"(int type, int arg1, int arg2) Event {
-	if (type == 5) { // GAMEEVENT_ROUND_STARTS
-		updateMatchStatus(ON_ROUND_STARTED);
-	} else if (type == 6) { // ended or aborted
-		updateMatchStatus(ON_ROUND_FINISHED);
-	} else if (type == 7) {
-		updateMatchStatus(ON_ROUND_ABORTED);
-	} else if (type == 0) { // Activator fragged 'arg1' player
-	}
+/*
+ * TODO:
+ * - announcer for ending warmup, respawn and match time
+ * - disable active abilities (and probably weapons) until player is activated
+ * - fix ROUND_PRESELECT_CHAMP on 2nd and later rounds
+ * - make number of champions configurable
+ * - bot "lives" should be aligned to the center
+ * - player "lives" should shrinked and aligned to the center
+ */
+
+Script "QCD_Event"(int type, int arg1, int arg2) Event {
+	if (type == 6) {
+        updateMatchStatus(ON_ROUND_FINISHED);
+    } else if (type == 7) {
+        updateMatchStatus(ON_ROUND_ABORTED);
+    }
 }
 
-Script "QCDE_Duel_Use" (/**TEST_TYPE:bool**/int down) Net {
+Script "QCD_Use" (/**TEST_TYPE:bool**/int down) Net {
 	pressedUse[duelIndex()] = down;
 }
 
-Script "QCDED_World_Loop" (void) {
-	printBold(s:"World loop started");
+function void updateMatchStatus (int when) {
+	log(s:"updateMatchStatus started.");
+	log(s:"state was ", i:roundActive, s:", event was ", i:when);
+
+	if (roundActive == ROUND_INIT && when == ON_OPEN) {
+        int warmupTime = getCVar("sv_duelcountdowntime");
+		/* int minWarmup = MAXMATES * 5 + AFTER_DRAFTING_PAUSE;
+		if (warmupTime < minWarmup) {
+			log(s:"Server is configured incorrectly. Ask the administrator to set warmup to at least ", i:minWarmup, s:" seconds");
+		} */
+		champDraftingTime = (warmupTime - AFTER_DRAFTING_PAUSE) / MAXMATES;
+		if (champDraftingTime < 5) champDraftingTime = 5;
+
+		roundActive = ROUND_PREDRAFT;
+	} else if (roundActive == ROUND_PREDRAFT && when == ON_PLAYERS_PRESENT) {
+		roundActive = ROUND_DRAFTING;
+	} else if (roundActive == ROUND_DRAFTING && when == ON_PLAYERS_DRAFTED) {
+	    roundActive = ROUND_WARMUP;
+    } else if (roundActive == ROUND_WARMUP && when == ON_WARMUP_FINISHED) {
+		roundActive = ROUND_PRESELECT_CHAMP;
+	} else if (roundActive < ROUND_STARTED && when == ON_OPEN) {
+		// TODO: make sure both players have same number of champions
+		roundActive = ROUND_STARTED;
+    } else if (when == ON_ROUND_FINISHED || when == ON_ROUND_ABORTED) {
+		// roundActive = ROUND_INIT;
+    } else if (when == ON_PLAYER_DEATH) { // can be fired during any round state
+        if (roundActive == ROUND_STARTED) {
+            bool foundUnused = false;
+            int di = duelIndex();
+            for (int i = 0; i < MAXMATES && !foundUnused; ++i) {
+                foundUnused = getChampStatus(di, i) == STATUS_UNUSED;
+            }
+            if (!foundUnused) {
+                int otherTeam = 1 - playerTeam();
+
+                givePointToTeam(otherTeam);
+
+                int points = getTeamProperty(otherTeam, TPROP_PointCount);
+                int pointlimit = getCVar("pointlimit");
+                if (pointlimit < points || pointlimit <= 0) {
+                    roundActive = ROUND_INIT; // reset for next map
+                    Exit_Normal(0);
+                } else {
+                    roundActive = ROUND_PRESELECT_CHAMP;
+                    ResetMap();
+                }
+            }
+        }
+	} else if (roundActive == ROUND_STARTED && when == ON_OPEN) {
+		// Intentionally empty. OPEN scripts are executed on round start
+	} else if (roundActive == ROUND_ILLEGAL_STATE) {
+        // Intentionally empty
+    }else {
+        log(s:"New Duel system crashed. Please send demo to the author. (Tech data: state=",
+            i:roundActive, s: ", event=", i:when, s:")");
+		roundActive = ROUND_ILLEGAL_STATE;
+	}
+
+	log(s:"state became ", i:roundActive, s:", event was ", i:when);
+	log(s:"updateMatchStatus ended");
+}
+
+function void givePointToTeam(int team) {
+    int pn = playerNumber();
+    if (pn < 0) {
+        log(s:"\c[red]QCD error: calling givePointToTeam on not a player");
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        setActivatorToPlayer(playerNumberForDuelIndex(i));
+        if (playerTeam() == team) {
+            team_GivePoints(team, 1, 1);
+            setActivatorToPlayer(pn);
+            return;
+        }
+    }
+    log(s:"\c[red]QCD error: specified team doesn't have any active duelists");
+}
+
+Script "QCD_World_Loop" (void) {
+	log(s:"World loop started");
 	int lastRound = -1;
+
+	int warmupTimeLimit = getCVar("sv_duelcountdowntime");
+	if (warmupTimeLimit < 0) {
+	    warmupTimeLimit = 0;
+	} else if (warmupTimeLimit > 60) {
+	    warmupTimeLimit = 60;
+	}
+	int warmupTimelimitTics = warmupTimeLimit * TICSPERSECOND;
+
 	while (true) {
 		if (lastRound != roundActive) {
 			lastRound = roundActive;
+            timeStarted = timer();
 			switch (roundActive) {
 				case ROUND_PREDRAFT:
-					ACS_NamedExecuteWait("QCDED_WaitForTwoPlayers", 0);
+					ACS_NamedExecuteWait("QCD_WaitForTwoPlayers", 0);
 					whoDraftsFirst = random(0, 1);
 					whoDraftsNow = playerNumberForDuelIndex(whoDraftsFirst);
 					updateMatchStatus(ON_PLAYERS_PRESENT);
 					break;
 				case ROUND_DRAFTING:
-					ACS_NamedExecuteWait("QCDED_WaitForDraftingCompletion", 0);
+					ACS_NamedExecuteWait("QCD_WaitForDraftingCompletion", 0);
 					killSafely(1000 + playerNumberForDuelIndex(0));
 					killSafely(1000 + playerNumberForDuelIndex(1));
 					updateMatchStatus(ON_PLAYERS_DRAFTED);
 					break;
+                case ROUND_PRESELECT_CHAMP:
+					killSafely(1000 + playerNumberForDuelIndex(0));
+					killSafely(1000 + playerNumberForDuelIndex(1));
+					break;
                 case ROUND_ILLEGAL_STATE:
-                    printBold(s:"New Duel system crashed. Please send demo to the author");
+                    log(s:"New Duel system crashed. Please send demo to the author");
                     break;
 			}
-		}
-		delay(17);
+		} else {
+		    switch (roundActive) {
+                case ROUND_WARMUP:
+                {
+                    int warmupTime = warmupTimelimitTics - (timer() - timeStarted);
+                    if (warmupTime <= 0) {
+                        updateMatchStatus(ON_WARMUP_FINISHED);
+                        break;
+                    }
+                    hudmessagebold(s:"Match will start in ", i:(warmupTime/TICSPERSECOND + PRESELECT_TIME + 1), s:" seconds";
+                        HUDMSG_PLAIN, 0, 0, 0.5, 0.5, 7.0 / TICSPERSECOND + 1);
+                    break;
+                }
+                case ROUND_PRESELECT_CHAMP:
+                {
+                    int preselectTime = PRESELECT_TIME*TICSPERSECOND - (timer() - timeStarted);
+                    if (preselectTime <= 0) {
+                        log(s:"Resetting map");
+                        ResetMap();
+                    }
+                    hudmessagebold(s:"Select the first champion for the upcoming round";
+                                            HUDMSG_PLAIN, 0, 0, 0.5, 0.4, 7.0 / TICSPERSECOND + 1);
+                    hudmessagebold(s:"Match will start in ", i:(preselectTime/TICSPERSECOND + 1), s:" seconds";
+                        HUDMSG_PLAIN, 0, 0, 0.5, 0.5, 7.0 / TICSPERSECOND + 1);
+                    break;
+                }
+		    }
+        }
+		delay(7);
 	}
 }
 
-function int playerNumberForDuelIndex(int di) {
-    if (di > 1) return -1000;
-    return duelPlayers[di] - 1;
-}
-
-Script "QCDED_Player_Loop" Enter {
+Script "QCD_Player_Loop" Enter {
 	int lastRound = -1;
 	bool activated;
 	int pn = playerNumber();
+	int di = duelIndex();
+	int pt = playerTeam();
+	int otherTeam = 1 - pt;
+	int otherDi = 1 - di;
+	int pointlimit = getCVar("pointlimit");
+	if (pointlimit <= 0) pointlimit = 1;
+
 	while (playerIsSpectator(pn) == 0) {
 		if (lastRound != roundActive) {
 			lastRound = roundActive;
 			switch (roundActive) {
 				case ROUND_DRAFTING:
 					activated = false;
-					ACS_NamedExecuteAlways("QCDE_Duel_ShowDraft", 0);
+					neutralizeMe();
+					ACS_NamedExecuteAlways("QCD_ShowDraft", 0);
 					ACS_NamedExecuteAlways("QCDE_Duel_Draft", 0);
 					break;
 			}
 		}
+		if (roundActive == ROUND_WARMUP && playerHealth() == 1) {
+		    int mytid = activatorTID();
+            if (mytid != 0) {
+                killSafely(mytid);
+            }
+		}
 
-		if (checkInventory(ITEM_ACTIVATED_TOKEN) < 1) {
-			neutralizeMe();
+        setInventory("TeamDeathmatch", 1);
+        name1[pn] = strparam(n:0);
+        name2[playerNumberForDuelIndex(otherDi)] = strparam(n:0);
+        score1[pn] = strparam(i:getTeamProperty(pt, TPROP_PointCount));
+        score2[pn] = strparam(i:getTeamProperty(otherTeam, TPROP_PointCount));
+        setInventory("QCDScore1", getTeamProperty(pt, TPROP_PointCount) * 220 / pointlimit);
+        setInventory("QCDScore2", getTeamProperty(otherTeam, TPROP_PointCount) * 220 / pointlimit);
+
+        if (checkInventory(ITEM_RESPAWN_FINISHED) > 0) {
+            if (checkInventory(ITEM_ACTIVATED_TOKEN) < 1) {
+                log(s:"Neutralized bc not activated");
+                neutralizeMe();
+            }
+            if (checkInventory(ITEM_NOTFROZEN_TOKEN) < 1) {
+                log(s:"Frozen bc not unfrozen");
+                SetPlayerProperty(0, ON, PROP_TOTALLYFROZEN);
+            }
 		}
-		if (checkInventory(ITEM_NOTFROZEN_TOKEN) < 1) {
-			SetPlayerProperty(0, ON, PROP_TOTALLYFROZEN);
-		}
+
 		delay(7);
 	}
-	printBold(s:"Player loop finished");
+	log(s:"Player loop finished");
 }
 
-Script "QCDE_Duel_Open" Open {
+Script "QCD_Player_Loop_Client" Enter CLIENTSIDE {
+	int di = duelIndex();
+	int otherDi = 1 - di;
+	int pn = playerNumber();
+	while (playerIsSpectator(pn) == 0) {
+		for (int i = 0; i < MAXMATES; ++i) {
+            setHudSize(1600, 1200, false);
+			if (getChampStatus(di, i) != STATUS_DEAD) {
+                int myChampion = getPickedClass(di, i);
+                if (0 <= myChampion && myChampion < NUMCHAMPS) {
+                    setFont(championFaces[myChampion]);
+                    hudmessage(s:"A";
+                            HUDMSG_PLAIN, 0, 0, 665.0-35.0*i, 110.1, 7.0 / TICSPERSECOND + 1);
+                }
+			}
+			if (getChampStatus(otherDi, i) != STATUS_DEAD) {
+                int othersChampion = getPickedClass(otherDi, i);
+                if (0 <= othersChampion && othersChampion < NUMCHAMPS) {
+                    setFont(championFaces[othersChampion]);
+                    hudmessage(s:"A";
+                            HUDMSG_PLAIN, 0, 0, 935.0+35.0*i, 110.1, 7.0 / TICSPERSECOND + 1);
+                }
+            }
+		}
+
+        delay(7);
+    }
+}
+
+Script "QCD_Open" Open {
 	updateMatchStatus(ON_OPEN);
-	ACS_NamedExecute("QCDED_World_Loop", 0);
+	ACS_NamedExecute("QCD_World_Loop", 0);
 }
 
-Script "QCDED_WaitForTwoPlayers" (void) {
+Script "QCD_WaitForTwoPlayers" (void) {
 	while (true) {
         int pc = playerCount();
         if (pc >= 2) {
@@ -218,20 +407,21 @@ Script "QCDED_WaitForTwoPlayers" (void) {
     }
 }
 
-Script "QCDED_WaitForDraftingCompletion" (void) {
+Script "QCD_WaitForDraftingCompletion" (void) {
 	while (!draftReady[0] && !draftReady[1]) {
 		delay(17);
 	}
 	delay(AFTER_DRAFTING_PAUSE*TICSPERSECOND); // Give players a chance to see the final selection
 }
 
-Script "QCDE_Duel_ShowDraft" (void) {
+Script "QCD_ShowDraft" (void) CLIENTSIDE {
 	int pn = playerNumber();
 	if (playerIsBot(pn)) terminate;
 	int yStep = (480 - 300) / MAXMATES;
 	int xStep = yStep * 2;
 	int di = duelIndex();
 	int otherDi = 1 - di;
+	fadeTo(0, 0, 255, 1.0, 1.0);
 	while (roundActive == ROUND_DRAFTING) {
 		for (int i = 0; i < MAXMATES; ++i) {
 			int myChampion = getPickedClass(di, i);
@@ -277,13 +467,13 @@ Script "QCDE_Duel_ShowDraft" (void) {
 					HUDMSG_PLAIN, 0, 0, 0.1 + selectStep*j*1.0 - 20.0, 600.2 - 100.0, 7.0 / TICSPERSECOND + 1);
 			}
 		}
-
 		delay(7);
 	}
+	cancelFade();
 }
 
 Script "QCDE_Duel_Draft" (void) {
-	int forRound = 0;
+	int champIndex = 0;
 	int di = duelIndex();
 	int pn = playerNumber();
 	resetPlayer(di);
@@ -291,8 +481,7 @@ Script "QCDE_Duel_Draft" (void) {
 	while (!draftReady[di]) {
 		if (whoDraftsNow == pn) {
 			if (playerIsBot(pn)) {
-				setPickedClass(di, forRound, getPlayerInfo(pn, PLAYERINFO_PLAYERCLASS));
-				// TODO: random class when round > 0
+				setPickedClass(di, champIndex, getPlayerInfo(pn, PLAYERINFO_PLAYERCLASS));
 			} else {
 				int draftingEnd = timer() + champDraftingTime*TICSPERSECOND;
 				int selectedChamp = 0;
@@ -309,28 +498,28 @@ Script "QCDE_Duel_Draft" (void) {
 						dir = 1;
 					} else if (timeLeft <= 0 || pressedUse[pn]) {
 						pressedUse[di] = false;
-						setPickedClass(di, forRound, selectedChamp);
-						if (forRound == 0) {
+						setPickedClass(di, champIndex, selectedChamp);
+						if (champIndex == 0) {
 							setNextSpawnClass(selectedChamp);
 						}
 						break;
 					}
 					int timeLeftSeconds = timeLeft / TICSPERSECOND;
 					if (timeLeftSeconds > 0) {
-						setPickedClass(di, forRound, -1 - timeLeftSeconds);
-					}
-
-					if (dir != 0) {
-						selectedChamp += dir;
-						while (findChosen(selectedChamp) != -1) {
-							selectedChamp += dir;
-						}
+						setPickedClass(di, champIndex, -1 - timeLeftSeconds);
 					}
 
 					while (selectedChamp < 0) {
 						selectedChamp += NUMCHAMPS;
 					}
+
 					selectedChamp %= NUMCHAMPS;
+					if (dir != 0) {
+						selectedChamp += dir;
+						while (findChosen(selectedChamp) >= 0) {
+							selectedChamp += dir;
+						}
+					}
 
 					hudmessage(s:"Select - ", s:champions[selectedChamp], s:"?",
 						s:" (",  i:timeLeft/TICSPERSECOND, s:" seconds left)";
@@ -338,21 +527,30 @@ Script "QCDE_Duel_Draft" (void) {
 					delay(3);
 				}
 			}
-			if ((whoDraftsFirst + di + forRound) % 2 == 0) {
+			if ((whoDraftsFirst + di + champIndex) % 2 == 0) {
 				whoDraftsNow = otherPlayer();
 			}
-			++forRound;
-			if (forRound >= MAXMATES) draftReady[di] = true;
+			++champIndex;
+			if (champIndex >= MAXMATES) draftReady[di] = true;
 		}
 		delay(17);
 	}
 }
 
 Script "QCDE_Duel_Enter" Enter {
+    if (getTeamProperty(playerTeam(), TPROP_NumPlayers) > 1) {
+        kickFromGame(playerNumber(), "Only one player per team is allowed");
+        terminate;
+    }
+
 	ACS_NamedExecuteAlways("QCDE_Duel_Respawn", 0);
 }
 Script "QCDE_Duel_Respawn" Respawn {
-	if (roundActive != ROUND_STARTED && roundActive != ROUND_WARMUP) terminate;
+    setPlayerProperty(0, (roundActive != ROUND_STARTED), PROP_BUDDHA);
+
+	if (roundActive != ROUND_STARTED
+	  && roundActive != ROUND_WARMUP
+	  && roundActive != ROUND_PRESELECT_CHAMP) terminate;
 
 	int pn = playerNumber();
 	int class = playerClass(pn);
@@ -360,14 +558,17 @@ Script "QCDE_Duel_Respawn" Respawn {
 	int di = duelIndex();
 	int i;
 	bool isBot = playerIsBot(pn);
-	if (isBot || getChampStatus(di, chosenIndex) == STATUS_UNUSED) {
+	bool validChampion = isBot || getChampStatus(di, chosenIndex) == STATUS_UNUSED;
+	if (validChampion && roundActive != ROUND_PRESELECT_CHAMP) {
 		if (!isBot) {
-			setChampStatus(di, chosenIndex, STATUS_USED);
-			for (i = 0; i < MAXMATES; ++i) {
-				if (getChampStatus(di, i) == STATUS_UNUSED) {
-					setNextSpawnClass(getPickedClass(di, i));
-					break;
-				}
+		    if (ROUND_WARMUP != roundActive) {
+                setChampStatus(di, chosenIndex, STATUS_USED);
+                for (i = 0; i < MAXMATES; ++i) {
+                    if (getChampStatus(di, i) == STATUS_UNUSED) {
+                        setNextSpawnClass(getPickedClass(di, i));
+                        break;
+                    }
+                }
 			}
 		} else {
 			for (i = 0; i < MAXMATES; ++i) {
@@ -379,90 +580,81 @@ Script "QCDE_Duel_Respawn" Respawn {
 		}
 		SetPlayerProperty(0, OFF, PROP_TOTALLYFROZEN);
 		giveInventory(ITEM_ACTIVATED, 1);
+		giveInventory(ITEM_RESPAWN_FINISHED, 1);
 	} else {
 		giveInventory(ITEM_DEACTIVATED, 1);
 
 		neutralizeMe();
+		giveInventory(ITEM_RESPAWN_FINISHED, 1);
 		delay(7);
 		neutralizeMe();
 
+        if (!isBot) {
+            int mytid = activatorTID();
+            ensurePlayerTid();
+            if (playerHealth() > 0 && mytid != 0) {
+                killSafely(mytid);
+            }
+            print(s:"Select a champion and press ", k:USE_KEY, s:" to spawn");
+		}
+	}
+}
+
+function void ensurePlayerTid(void) {
 		int mytid = activatorTID();
 		if (mytid == 0) {
-			mytid = 1000 + pn;
+			mytid = 1000 + playerNumber();
 			while (isTidUsed(mytid)) {
 				++mytid;
 			}
 			Thing_ChangeTID(0, mytid);
-			printBold(s:"My tid - ", d:mytid);
 		}
-
-		if (playerHealth() > 0 && mytid != 0) {
-			killSafely(mytid);
-		}
-		print(s:"Select a champion and press ", k:USE_KEY, s:" to spawn");
-	}
-}
-
-function void updateMatchStatus (int when) {
-	printBold(s:"updateMatchStatus started.");
-	printBold(s:"state was ", i:roundActive, s:", event was ", i:when); 
-
-	if (roundActive == ROUND_INIT && when == ON_OPEN) {
-		int warmupTime = getCVar("sv_duelcountdowntime");
-		int minWarmup = MAXMATES * 10 + AFTER_DRAFTING_PAUSE;
-		if (warmupTime < minWarmup) {
-			printBold(s:"Server is configured incorrectly. Ask the administrator to set warmup to at least ", i:minWarmup, s:" seconds");
-		}
-		champDraftingTime = (warmupTime - AFTER_DRAFTING_PAUSE) / MAXMATES;
-		if (champDraftingTime < 5) champDraftingTime = 5;
-
-		roundActive = ROUND_PREDRAFT;
-	} else if (roundActive == ROUND_PREDRAFT && when == ON_PLAYERS_PRESENT) {
-		roundActive = ROUND_DRAFTING;
-	} else if (roundActive == ROUND_DRAFTING && when == ON_PLAYERS_DRAFTED) {
-		roundActive = ROUND_WARMUP;
-	} else if (roundActive <= ROUND_STARTED
-		&& (when == ON_ROUND_STARTED || when == ON_OPEN)) {
-		// TODO: make sure both players have same number of champions
-		roundActive = ROUND_STARTED;
-	} else if (when == ON_ROUND_FINISHED || when == ON_ROUND_ABORTED) {
-		roundActive = ROUND_INIT;
-	} else if (roundActive == ROUND_STARTED && when == ON_OPEN) {
-		// Intentionally empty. OPEN scripts are executed on round start
-	} else if (roundActive == ROUND_ILLEGAL_STATE) {
-        // Intentionally empty
-    }else {
-        printBold(s:"New Duel system crashed. Please send demo to the author. (Tech data: state=",
-            i:roundActive, s: ", event=", i:when, s:")");
-		roundActive = ROUND_ILLEGAL_STATE;
-	}
-
-	printBold(s:"state became ", i:roundActive, s:", event was ", i:when); 
-	printBold(s:"updateMatchStatus ended");
 }
 
 function void killSafely(int playerTid) {
+    if (playerTid == 0) {
+        return;
+    }
+
+    int oldActivator = activatorTID();
+    setActivator(playerTid);
+    setPlayerProperty(0, 0, PROP_BUDDHA);
+
 	int newtid = uniqueTID();
 	spawnForced("PlayerReintroducer", -30000.0, -30000.0, 0, newtid, 0);
 	setActivator(newtid);
 	thing_Damage2(playerTid, 9999, "PlayerRemoved");
-	setActivator(playerTid);
+	setActivator(oldActivator);
 }
 
 Script "QCDE_Duel_Death" Death
 {
-	if (roundActive != ROUND_STARTED && roundActive != ROUND_WARMUP) terminate;
+    takeInventory(ITEM_RESPAWN_FINISHED, 999);
 
-	setHudSize(320, 240, false);
+    updateMatchStatus(ON_PLAYER_DEATH);
+	if (roundActive != ROUND_STARTED
+	  && roundActive != ROUND_WARMUP
+	  && roundActive != ROUND_PRESELECT_CHAMP) terminate;
+
+    int i;
+	int di = duelIndex();
+
 	bool canSpawn = false;
 	int champIndex = -1;
-	int di = duelIndex();
 	int pn = playerNumber();
+    markUsedAsDead(di);
+
+    if (playerIsBot(pn)) terminate;
+
 	while (getActorProperty(0, APROP_HEALTH) <= 0) {
-		int nextClass = getNextSpawnClass();
-        int i;
-		for (i = 0; i < MAXMATES && !canSpawn; ++i) {
-			canSpawn = (nextClass == getPickedClass(di, i) && getChampStatus(di, i) == STATUS_UNUSED);
+        int nextClass = getNextSpawnClass();
+
+		if (roundActive != ROUND_PRESELECT_CHAMP) {
+            for (i = 0; i < MAXMATES && !canSpawn; ++i) {
+                canSpawn = (nextClass == getPickedClass(di, i) && getChampStatus(di, i) == STATUS_UNUSED);
+            }
+		} else {
+		    canSpawn = false;
 		}
 		if (canSpawn) {
 			if (checkInventory(ITEM_FROZEN) > 0) {
@@ -475,7 +667,6 @@ Script "QCDE_Duel_Death" Death
 			}
 		}
 
-		int index = 0;
 		int buttons = getPlayerInput(pn, INPUT_BUTTONS);
 		for (i = 0; i < MAXMATES; ++i) {
 			if (getChampStatus(di, i) != STATUS_UNUSED) continue;
@@ -486,18 +677,26 @@ Script "QCDE_Duel_Death" Death
 				champIndex = i;
 			}
 
-			str selected = "";
+			str selected1 = "";
+			str selected2 = "";
 			if (i == champIndex) {
 				setNextSpawnClass(iterClass);
 				nextClass = getNextSpawnClass();
 			}
 			if (nextClass == iterClass) {
-				selected = ">";
+				selected1 = "[";
+				selected2 = "]";
 			}
 
-			hudmessage(s:selected, s:"[", k:champ_actions[index], s:"] - ", s:champions[iterClass];
-					HUDMSG_PLAIN, 0, 0, 60.4, 30.1+10.0*index, 7.0 / TICSPERSECOND + 1);
-			++index;
+            setHudSize(640, 480, false);
+            setFont(championSprites[iterClass]);
+			hudmessage(s:"A";
+					HUDMSG_PLAIN, 0, 0, 120.4 + 80.0*i, 360.2, 7.0 / TICSPERSECOND + 1);
+            setFont("SMALLFONT");
+            setHudWrapWidth(80);
+			hudmessage(s:selected1, k:champ_actions[i], s:selected2;
+					HUDMSG_PLAIN, 0, 0, 120.4 + 80.0*i, 360.1, 7.0 / TICSPERSECOND + 1);
+            setHudWrapWidth(0);
 		}
 		delay(7);
 	}
@@ -565,43 +764,43 @@ function int otherPlayer(void) {
 	return playerNumberForDuelIndex(1 - duelIndex());
 }
 
-function int getPickedClass(int duelPlayer, int forRound) {
-	if (forRound < 0 || forRound >= MAXMATES) {
+function int getPickedClass(int duelPlayer, int champIndex) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
 		return -100;
 	}
 	if (duelPlayer < 0 || duelPlayer >= 2) {
 		return -100;
 	}
-	return chosenClass[MAXMATES*duelPlayer + forRound];
+	return chosenClass[MAXMATES*duelPlayer + champIndex];
 }
 
-function void setPickedClass(int duelPlayer, int forRound, int newClass) {
-	if (forRound < 0 || forRound >= MAXMATES) {
+function void setPickedClass(int duelPlayer, int champIndex, int newClass) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
 		return;
 	}
 	if (duelPlayer < 0 || duelPlayer >= 2) {
 		return;
 	}
-	chosenClass[MAXMATES*duelPlayer + forRound] = newClass;
+	chosenClass[MAXMATES*duelPlayer + champIndex] = newClass;
 }
 
-function int getChampStatus(int duelPlayer, int forRound) {
-	if (forRound < 0 || forRound >= MAXMATES) {
+function int getChampStatus(int duelPlayer, int champIndex) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
 		return -100;
 	}
 	if (duelPlayer < 0 || duelPlayer >= 2) {
 		return -100;
 	}
-	return champStatus[forRound][duelPlayer];
+	return champStatus[champIndex][duelPlayer];
 }
-function void setChampStatus(int duelPlayer, int forRound, int newStatus) {
-	if (forRound < 0 || forRound >= MAXMATES) {
+function void setChampStatus(int duelPlayer, int champIndex, int newStatus) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
 		return;
 	}
 	if (duelPlayer < 0 || duelPlayer >= 2) {
 		return;
 	}
-	champStatus[forRound][duelPlayer] = newStatus;
+	champStatus[champIndex][duelPlayer] = newStatus;
 }
 
 function void resetPlayer(int duelPlayer) {
@@ -609,6 +808,29 @@ function void resetPlayer(int duelPlayer) {
 		setPickedClass(duelPlayer, i, -1);
 		setChampStatus(duelPlayer, i, STATUS_UNUSED);
 	}
+}
+
+function void markUsedAsDead(int di) {
+    for (int i = 0; i < MAXMATES; ++i) {
+        if (STATUS_USED == getChampStatus(di, i)) {
+            setChampStatus(di, i, STATUS_DEAD);
+        }
+    }
+}
+
+function int playerNumberForDuelIndex(int di) {
+    if (di > 1) return -1000;
+    return duelPlayers[di] - 1;
+}
+
+function void setInventory(str name, int count) {
+    int current = checkInventory(name);
+    int diff = count - current;
+    if (diff > 0) {
+        giveInventory(name, diff);
+    } else if (diff < 0) {
+        takeInventory(name, -diff);
+    }
 }
 
 /**TEST_ONLY_SCRIPTS

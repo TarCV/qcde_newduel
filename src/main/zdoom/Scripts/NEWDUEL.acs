@@ -14,16 +14,26 @@ global str 17:name2[];
 
 world int 88:chosenClass[];
 world int 87:duelPlayers[];
-
 world int 86:roundActive;
+world str 85:roundMapname;
+
 #libdefine ROUND_INIT 0
-#libdefine ROUND_PREDRAFT 1
-#libdefine ROUND_DRAFTING 2
-#libdefine ROUND_WARMUP 3
-#libdefine ROUND_PRESELECT_CHAMP 4
-#libdefine ROUND_STARTED 5
+#libdefine ROUND_COUNTDOWN 1
+#libdefine ROUND_PREDRAFT 2
+#libdefine ROUND_DRAFTING 3
+#libdefine ROUND_WARMUP 4
+#libdefine ROUND_PRESELECT_CHAMP 5
+#libdefine ROUND_STARTED 6
 #libdefine ROUND_ILLEGAL_STATE -1
 
+#libdefine ON_OPEN 0
+#libdefine ON_PLAYERS_PRESENT 1
+#libdefine ON_PLAYERS_DRAFTED 2
+#libdefine ON_ROUND_STARTED 3
+#libdefine ON_ROUND_FINISHED 4
+#libdefine ON_ROUND_ABORTED 5
+#libdefine ON_WARMUP_FINISHED 6
+#libdefine ON_PLAYER_DEATH 7
 
 int champStatus[MAXMATES][2];
 #libdefine STATUS_UNUSED 0
@@ -114,16 +124,6 @@ str championSprites[NUMCHAMPS] = {
 str champ_actions[MAXMATES] = {"+moveleft", "+forward", "+moveright", "+back", "+jump"};
 int champ_buttons[MAXMATES] = {BT_MOVELEFT, BT_FORWARD, BT_MOVERIGHT, BT_BACK, BT_JUMP};
 
-#libdefine ON_OPEN 0
-#libdefine ON_PLAYERS_PRESENT 1
-#libdefine ON_PLAYERS_DRAFTED 2
-//#libdefine ON_ROUND_STARTED 3
-#libdefine ON_ROUND_FINISHED 4
-#libdefine ON_ROUND_ABORTED 5
-#libdefine ON_WARMUP_FINISHED 6
-#libdefine ON_PLAYER_DEATH 7
-
-
 bool draftReady[2];
 int whoDraftsNow = -1;
 int whoDraftsFirst = 0;
@@ -139,8 +139,15 @@ int timeStarted = -1;
  * - player "lives" should shrinked and aligned to the center
  */
 
+Script "QCDE_InitLMS" (void)
+{
+    // Do not give health and weapons
+}
+
 Script "QCD_Event"(int type, int arg1, int arg2) Event {
-	if (type == 6) {
+    if (type == 5) {
+        updateMatchStatus(ON_ROUND_STARTED);
+	} if (type == 6) {
         updateMatchStatus(ON_ROUND_FINISHED);
     } else if (type == 7) {
         updateMatchStatus(ON_ROUND_ABORTED);
@@ -153,81 +160,78 @@ Script "QCD_Use" (/**TEST_TYPE:bool**/int down) Net {
 
 function void updateMatchStatus (int when) {
 	log(s:"updateMatchStatus started.");
+
+    str currentMap = strparam(n:PRINTNAME_LEVEL);
+    if (when == ON_OPEN && strcmp(roundMapname, currentMap) != 0) {
+        roundMapname = currentMap;
+        roundActive = ROUND_INIT;
+    }
+
 	log(s:"state was ", i:roundActive, s:", event was ", i:when);
+    int i;
+	if (roundActive == ROUND_INIT && (when == ON_ROUND_STARTED || when == ON_OPEN)) {
+        if (getGameModeState() == 2) {
+            int pc = playerCount();
+            if (pc >= 2) {
+                int cursor = 0;
+                for (i = 0; i < pc; ++i) {
+                    if (playerIsSpectator(i) == 0) {
+                        if (cursor >= 2) {
+                            kickFromGame(i, "There can be only two");
+                        } else {
+                            duelPlayers[cursor] = i + 1;
+                            draftReady[cursor] = false;
+                            ++cursor;
+                        }
+                    }
+                }
+            }
 
-	if (roundActive == ROUND_INIT && when == ON_OPEN) {
-        int warmupTime = getCVar("sv_duelcountdowntime");
-		/* int minWarmup = MAXMATES * 5 + AFTER_DRAFTING_PAUSE;
-		if (warmupTime < minWarmup) {
-			log(s:"Server is configured incorrectly. Ask the administrator to set warmup to at least ", i:minWarmup, s:" seconds");
-		} */
-		champDraftingTime = (warmupTime - AFTER_DRAFTING_PAUSE) / MAXMATES;
-		if (champDraftingTime < 5) champDraftingTime = 5;
+            int warmupTime = getCVar("sv_duelcountdowntime");
+            /* int minWarmup = MAXMATES * 5 + AFTER_DRAFTING_PAUSE;
+            if (warmupTime < minWarmup) {
+                log(s:"Server is configured incorrectly. Ask the administrator to set warmup to at least ", i:minWarmup, s:" seconds");
+            } */
+            champDraftingTime = (warmupTime - AFTER_DRAFTING_PAUSE) / MAXMATES;
+            if (champDraftingTime < 5) champDraftingTime = 5;
 
-		roundActive = ROUND_PREDRAFT;
-	} else if (roundActive == ROUND_PREDRAFT && when == ON_PLAYERS_PRESENT) {
-		roundActive = ROUND_DRAFTING;
+            whoDraftsFirst = random(0, 1);
+            whoDraftsNow = playerNumberForDuelIndex(whoDraftsFirst);
+            roundActive = ROUND_DRAFTING;
+		}
+    } else if (roundActive == ROUND_DRAFTING && (when == ON_ROUND_STARTED || when == ON_OPEN)) {
+        // no op
 	} else if (roundActive == ROUND_DRAFTING && when == ON_PLAYERS_DRAFTED) {
 	    roundActive = ROUND_WARMUP;
     } else if (roundActive == ROUND_WARMUP && when == ON_WARMUP_FINISHED) {
 		roundActive = ROUND_PRESELECT_CHAMP;
-	} else if (roundActive < ROUND_STARTED && when == ON_OPEN) {
-		// TODO: make sure both players have same number of champions
-		roundActive = ROUND_STARTED;
-    } else if (when == ON_ROUND_FINISHED || when == ON_ROUND_ABORTED) {
-		// roundActive = ROUND_INIT;
+    } else if (when == ON_OPEN && ROUND_WARMUP <= roundActive && roundActive < ROUND_STARTED) {
+        roundActive = ROUND_STARTED;
+	} else if (roundActive == ROUND_STARTED && (when == ON_OPEN || when == ON_ROUND_STARTED)) {
+		// no-op: 2nd or 3rd round started, nothing to do
     } else if (when == ON_PLAYER_DEATH) { // can be fired during any round state
         if (roundActive == ROUND_STARTED) {
             bool foundUnused = false;
             int di = duelIndex();
-            for (int i = 0; i < MAXMATES && !foundUnused; ++i) {
+            for (i = 0; i < MAXMATES && !foundUnused; ++i) {
                 foundUnused = getChampStatus(di, i) == STATUS_UNUSED;
             }
             if (!foundUnused) {
-                int otherTeam = 1 - playerTeam();
-
-                givePointToTeam(otherTeam);
-
-                int points = getTeamProperty(otherTeam, TPROP_PointCount);
-                int pointlimit = getCVar("pointlimit");
-                if (pointlimit < points || pointlimit <= 0) {
-                    roundActive = ROUND_INIT; // reset for next map
-                    Exit_Normal(0);
-                } else {
-                    roundActive = ROUND_PRESELECT_CHAMP;
-                    ResetMap();
-                }
+                SetPlayerLivesLeft(playerNumber(), 0);
             }
         }
-	} else if (roundActive == ROUND_STARTED && when == ON_OPEN) {
-		// Intentionally empty. OPEN scripts are executed on round start
+	} else if (when == ON_ROUND_FINISHED || when == ON_ROUND_ABORTED) {
+		// roundActive = ROUND_INIT;
 	} else if (roundActive == ROUND_ILLEGAL_STATE) {
         // Intentionally empty
-    }else {
-        log(s:"New Duel system crashed. Please send demo to the author. (Tech data: state=",
+    } else {
+        log(s:"New Duel system crashed. Please send the log and the demo to the author. (Tech data: state=",
             i:roundActive, s: ", event=", i:when, s:")");
 		roundActive = ROUND_ILLEGAL_STATE;
 	}
 
 	log(s:"state became ", i:roundActive, s:", event was ", i:when);
 	log(s:"updateMatchStatus ended");
-}
-
-function void givePointToTeam(int team) {
-    int pn = playerNumber();
-    if (pn < 0) {
-        log(s:"\c[red]QCD error: calling givePointToTeam on not a player");
-        return;
-    }
-    for (int i = 0; i < 2; ++i) {
-        setActivatorToPlayer(playerNumberForDuelIndex(i));
-        if (playerTeam() == team) {
-            team_GivePoints(team, 1, 1);
-            setActivatorToPlayer(pn);
-            return;
-        }
-    }
-    log(s:"\c[red]QCD error: specified team doesn't have any active duelists");
 }
 
 Script "QCD_World_Loop" (void) {
@@ -247,12 +251,6 @@ Script "QCD_World_Loop" (void) {
 			lastRound = roundActive;
             timeStarted = timer();
 			switch (roundActive) {
-				case ROUND_PREDRAFT:
-					ACS_NamedExecuteWait("QCD_WaitForTwoPlayers", 0);
-					whoDraftsFirst = random(0, 1);
-					whoDraftsNow = playerNumberForDuelIndex(whoDraftsFirst);
-					updateMatchStatus(ON_PLAYERS_PRESENT);
-					break;
 				case ROUND_DRAFTING:
 					ACS_NamedExecuteWait("QCD_WaitForDraftingCompletion", 0);
 					killSafely(1000 + playerNumberForDuelIndex(0));
@@ -329,14 +327,6 @@ Script "QCD_Player_Loop" Enter {
             }
 		}
 
-        setInventory("TeamDeathmatch", 1);
-        name1[pn] = strparam(n:0);
-        name2[playerNumberForDuelIndex(otherDi)] = strparam(n:0);
-        score1[pn] = strparam(i:getTeamProperty(pt, TPROP_PointCount));
-        score2[pn] = strparam(i:getTeamProperty(otherTeam, TPROP_PointCount));
-        setInventory("QCDScore1", getTeamProperty(pt, TPROP_PointCount) * 220 / pointlimit);
-        setInventory("QCDScore2", getTeamProperty(otherTeam, TPROP_PointCount) * 220 / pointlimit);
-
         if (checkInventory(ITEM_RESPAWN_FINISHED) > 0) {
             if (checkInventory(ITEM_ACTIVATED_TOKEN) < 1) {
                 log(s:"Neutralized bc not activated");
@@ -387,26 +377,6 @@ Script "QCD_Open" Open {
 	ACS_NamedExecute("QCD_World_Loop", 0);
 }
 
-Script "QCD_WaitForTwoPlayers" (void) {
-	while (true) {
-        int pc = playerCount();
-        if (pc >= 2) {
-            int cursor = 0;
-            for (int i = 0; i < pc && cursor < 2; ++i) {
-                if (playerIsSpectator(i) == 0) {
-                    duelPlayers[cursor] = i + 1;
-                    draftReady[cursor] = false;
-                    ++cursor;
-                }
-            }
-            if (cursor >= 2) {
-                break;
-            }
-        }
-        delay(17);
-    }
-}
-
 Script "QCD_WaitForDraftingCompletion" (void) {
 	while (!draftReady[0] && !draftReady[1]) {
 		delay(17);
@@ -422,7 +392,9 @@ Script "QCD_ShowDraft" (void) CLIENTSIDE {
 	int di = duelIndex();
 	int otherDi = 1 - di;
 	fadeTo(0, 0, 255, 1.0, 1.0);
+	log(s:"QCD_ShowDraft");
 	while (roundActive == ROUND_DRAFTING) {
+	log(s:"QCD_ShowDraft tic", d:timer());
 		for (int i = 0; i < MAXMATES; ++i) {
 			int myChampion = getPickedClass(di, i);
 			int othersChampions = getPickedClass(otherDi, i);
@@ -447,7 +419,7 @@ Script "QCD_ShowDraft" (void) CLIENTSIDE {
 				setFont("BIGFONT");
 				hudmessage(i:-myChampion;
 					HUDMSG_PLAIN, 0, 0, 75.0 + xStep*(i%2)*1.0, 170.2 + yStep*i*1.0, 7.0 / TICSPERSECOND + 1);
-			} 
+			}
 			if (othersChampions >= 0) {
 				setFont(championSprites[othersChampions]);
 				hudmessage(s:"A";
@@ -615,6 +587,7 @@ function void killSafely(int playerTid) {
     if (playerTid == 0) {
         return;
     }
+    int pn = playerTid - 1000;
 
     int oldActivator = activatorTID();
     setActivator(playerTid);
@@ -623,6 +596,7 @@ function void killSafely(int playerTid) {
 	int newtid = uniqueTID();
 	spawnForced("PlayerReintroducer", -30000.0, -30000.0, 0, newtid, 0);
 	setActivator(newtid);
+	SetPlayerLivesLeft(playerTid - 1000, GetPlayerLivesLeft(pn) + 1);
 	thing_Damage2(playerTid, 9999, "PlayerRemoved");
 	setActivator(oldActivator);
 }

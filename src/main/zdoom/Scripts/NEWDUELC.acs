@@ -1,0 +1,411 @@
+#library "NEWDUELC"
+#include "zcommon.acs"
+
+// All client side scripts should be defined here
+// These scripts must not share any vars with other libs
+// These scripts must interact with the HUD only, no sim interactions
+// All delays must be at least 3 tics to make sure variables are synced
+
+#libdefine MAXMATES 5
+#libdefine NUMCHAMPS 20
+#libdefine TICSPERSECOND 35
+
+// These vars are player-specific, but bots don't use them, so don't make them arrays
+// player-specific, local only
+bool pressedUse;
+int draftSelection;
+
+// player-specific, must be in sync with the server
+int chosenClass[2*MAXMATES];
+int duelPlayers[2];
+int champStatus[MAXMATES][2];
+#libdefine STATUS_UNUSED 0
+#libdefine STATUS_USED 1
+#libdefine STATUS_DEAD 2
+
+// global, must be in sync with the server
+int whoDraftsNow = -1;
+int roundActive;
+#libdefine ROUND_DRAFTING 3
+
+str champions[NUMCHAMPS] = {
+	"Ranger",
+	"DoomSlayer",
+	"Corvus",
+	"Bitterman",
+	"Galen",
+	"Duke Nukem",
+	"Sarge",
+	"Grayson",
+	"Kane",
+	"Caleb",
+	"Menelkir",
+	"Nyx",
+	"Durandal",
+	"Lo Wang",
+	"Terminator",
+	"Zedek",
+	"Inquisitor",
+	"Sorgaul",
+	"Keel",
+	"Eradicator"
+};
+
+str championFaces[NUMCHAMPS] = {
+	"PORTRA01",
+	"PORTRA02",
+	"PORTRA03",
+	"PORTRA10",
+	"PORTRA11",
+	"PORTRA14",
+	"PORTRA17",
+	"PORTRA19",
+	"PORTRA04",
+	"PORTRA05",
+	"PORTRA06",
+	"PORTRA12",
+	"PORTRA15",
+	"PORTRA18",
+	"PORTRA07",
+	"PORTRA08",
+	"PORTRA09",
+	"PORTRA13",
+	"PORTRA16",
+	"PORTRA20"
+};
+
+// Scales from DECORATE
+int championScale[NUMCHAMPS] = {
+    0.89,
+    1.05,
+    1.1,
+    0.685,
+    0.885,
+    0.692,
+    0.71,
+    0.75,
+    0.535,
+    0.45,
+    0.818,
+    0.848,
+    0.66,
+    0.52,
+    0.92,
+    1.0,
+    0.508,
+    0.665,
+    0.63,
+    0.8
+};
+
+str championSprites[NUMCHAMPS] = {
+	"P01E8",
+	"P02A1",
+	"P03A1",
+	"P10G1",
+	"P11E1",
+	"P14E1",
+	"P17F1",
+	"P19E1",
+	"P04E1",
+	"P05G1",
+	"P06A1",
+	"P12E1",
+	"P15A1",
+	"P18G1",
+	"P07E1",
+	"P08E1",
+	"P09I1",
+	"P13G1",
+	"P16E1",
+	"P20h1"
+};
+
+Script "QCD_Player_Loop_Client" Enter CLIENTSIDE {
+	int pn = playerNumber();
+	if (playerIsBot(pn)) terminate;
+	while (playerIsSpectator(pn) == 0) {
+	    int di = duelIndex();
+    	int otherDi = 1 - di;
+		for (int i = 0; i < MAXMATES; ++i) {
+            setHudSize(1600, 1200, true);
+			if (getChampStatus(di, i) != STATUS_DEAD) {
+                int myChampion = getPickedClass(di, i);
+                if (0 <= myChampion && myChampion < NUMCHAMPS) {
+                    setFont(championFaces[myChampion]);
+                    hudmessage(s:"A";
+                            HUDMSG_PLAIN, 0, 0, 665.0-35.0*i, 110.1, 7.0 / TICSPERSECOND + 1);
+                }
+			}
+			if (getChampStatus(otherDi, i) != STATUS_DEAD) {
+                int othersChampion = getPickedClass(otherDi, i);
+                if (0 <= othersChampion && othersChampion < NUMCHAMPS) {
+                    setFont(championFaces[othersChampion]);
+                    hudmessage(s:"A";
+                            HUDMSG_PLAIN, 0, 0, 935.0+35.0*i, 110.1, 7.0 / TICSPERSECOND + 1);
+                }
+            }
+		}
+
+        delay(7);
+    }
+}
+
+Script "QCD_ShowDraft" (int champNum) CLIENTSIDE {
+	int pn = playerNumber();
+	if (playerIsBot(pn)) terminate;
+	int yStep = (480 - 300) / MAXMATES;
+	int xStep = yStep * 2;
+	fadeTo(0, 0, 255, 1.0, 1.0);
+	while (roundActive == ROUND_DRAFTING) {
+	    int di = duelIndex();
+    	int otherDi = 1 - di;
+		for (int i = 0; i < champNum; ++i) {
+			int myChampion = getPickedClass(di, i);
+			int othersChampions = getPickedClass(otherDi, i);
+
+			setHudSize(640, 480, true);
+
+			setFont("SMALLFONT");
+			hudmessage(i:i+1;
+				HUDMSG_PLAIN, 0, 0, 320.4, 100.1 + 16.0*i, 7.0 / TICSPERSECOND + 1);
+			hudmessage(s:idToClass(myChampion);
+				HUDMSG_PLAIN, 0, 0, 300.6, 100.1 + 16.0*i, 7.0 / TICSPERSECOND + 1);
+			hudmessage(s:idToClass(othersChampions);
+				HUDMSG_PLAIN, 0, 0, 340.5, 100.1 + 16.0*i, 7.0 / TICSPERSECOND + 1);
+
+			if (myChampion >= 0) {
+			    setHudSizeForChampion(myChampion, 640, 480);
+				setFont(championSprite(myChampion, "Q"));
+				hudmessage(s:"A";
+					HUDMSG_PLAIN, 0, 0,
+					0.1 + scaleIntForChampion(myChampion, 75+xStep*(i%2)) * 1.0,
+					0.1 + scaleIntForChampion(myChampion, 110+yStep*i) * 1.0,
+					7.0 / TICSPERSECOND + 1);
+			}
+			if (othersChampions >= 0) {
+			    setHudSizeForChampion(othersChampions, 640, 480);
+				setFont(championSprite(othersChampions, "Q"));
+				hudmessage(s:"A";
+					HUDMSG_PLAIN, 0, 0,
+				    0.1 + scaleIntForChampion(othersChampions, 640-75-xStep*(i%2)) * 1.0,
+					0.1 + scaleIntForChampion(othersChampions, 110+yStep*i) * 1.0,
+					7.0 / TICSPERSECOND + 1);
+			}
+		}
+
+        if (whoDraftsNow == pn) {
+            int selectStep = 800 / NUMCHAMPS * 2;
+            for (int j = 0; j < NUMCHAMPS; ++j) {
+                setHudSizeForChampion(j, 800, 600);
+                if (draftSelection == j && whoDraftsNow == pn) {
+                    setFont(championSprite(j, "R"));
+                } else {
+                    setFont(championSprite(j, "Q"));
+                }
+                if (findChosen(j) < 0) {
+                    hudmessage(s:"A";
+                        HUDMSG_PLAIN, 0, 0,
+                        0.1 + scaleIntForChampion(j, selectStep*(j%(NUMCHAMPS/2)) + (800-selectStep*(NUMCHAMPS/2-1))/2 ) * 1.0,
+                        0.1 + scaleIntForChampion(j, 340 + 80*(j/(NUMCHAMPS/2))) * 1.0,
+                        7.0 / TICSPERSECOND + 1);
+                }
+            }
+		}
+		delay(7);
+	}
+	cancelFade();
+}
+Script "QCDE_Duel_Draft_Client" (int serverSecret, int champNum) CLIENTSIDE {
+	int champIndex = 0;
+	int pn = playerNumber();
+
+    if (playerIsBot(pn)) terminate;
+
+	while (getDraftCursorClient(duelIndex(), champNum) < champNum) {
+        while (whoDraftsNow == pn) {
+            delay(3);
+
+            int localDraftSelection = draftSelection;
+            int buttons = getPlayerInput(pn, INPUT_BUTTONS);
+            int dir = 0;
+            int di = duelIndex();
+
+            if (buttons == BT_MOVELEFT || buttons == BT_LEFT) {
+                dir = -1;
+            } else if (buttons == BT_MOVERIGHT || buttons == BT_RIGHT) {
+                dir = 1;
+            } else if (buttons == BT_FORWARD) {
+                dir = NUMCHAMPS / 2;
+            } else if (buttons == BT_BACK) {
+                dir = -NUMCHAMPS / 2;
+            } else if (pressedUse) {
+                pressedUse = false;
+                NamedRequestScriptPuke("QCD_Draft_Select", serverSecret, di*MAXMATES + getDraftCursorClient(di, champNum), localDraftSelection);
+                continue;
+            }
+
+            if (dir != 0) {
+                localDraftSelection += dir;
+                while (findChosen(localDraftSelection) >= 0) {
+                    localDraftSelection += sign(dir);
+                }
+                NamedRequestScriptPuke("QCD_Draft_Preselect", serverSecret, di, localDraftSelection);
+            }
+        }
+		delay(7);
+	}
+}
+Script "QCD_Use" (/**TEST_TYPE:bool**/int down) CLIENTSIDE {
+	pressedUse = down;
+}
+
+Script "QCD_Draft_Refresh_Client" (int pn, int champion, int whoPicksNow) CLIENTSIDE {
+    log(s:"QCD_Draft_Refresh_Client ", d:pn, s:" champ=", d:champion, s:" who=", d:whoPicksNow);
+    if (playerNumber() == pn) {
+        draftSelection = champion;
+    }
+    whoDraftsNow = whoPicksNow;
+}
+
+Script "QCD_Refresh_Round" (int newRoundState, int di0, int di1) CLIENTSIDE {
+    log(s:"QCD_Refresh_Round ", s:" newRoundState=", d:newRoundState, s:" di0=", d:di0, s:" di1=", d:di1);
+    roundActive = newRoundState;
+    duelPlayers[0] = di0;
+    duelPlayers[1] = di1;
+}
+
+Script "QCD_setPickedClass_Client" (int di, int champIndex, int newSelection) CLIENTSIDE {
+    log(s:"QCD_setPickedClass_Client ", s:" di=", d:di, s:" champIndex=", d:champIndex, s:" newSelection=", d:newSelection);
+	setPickedClass(di, champIndex, newSelection);
+}
+
+Script "QCD_setChampStatus_Client" (int duelPlayer, int champIndex, int newStatus) CLIENTSIDE {
+    log(s:"QCD_setChampStatus_Client ", s:" di=", d:duelPlayer, s:" champIndex=", d:champIndex, s:" newStatus=", d:newStatus);
+	setChampStatus(duelPlayer, champIndex, duelPlayer);
+}
+
+function int getDraftCursorClient(int di, int champNum) {
+    int draftCursor = champNum;
+    for (int i = 0; i < champNum; ++i) {
+        if (getPickedClass(di, i) < 0) {
+            draftCursor = i;
+            break;
+        }
+    }
+    return draftCursor;
+}
+
+function void setHudSizeForChampion(int champion, int width, int height) {
+    setHudSize(
+        scaleIntForChampion(champion, width),
+        scaleIntForChampion(champion, height),
+        false
+    );
+}
+function int scaleIntForChampion(int champion, int value) {
+    if (value >= 1.0 || value <= -1.0) log(s:"scaleIntForChampion warning:", d:value);
+    if (champion < 0) return value;
+
+    int result = fixedDiv(value * 1.0, championScale[champion]) / 1.0;
+    return result;
+}
+
+function int findChosen(int class) {
+	if (class < 0) return -100;
+	for (int i = 0; i < MAXMATES; ++i) {
+		if (class == getPickedClass(duelIndex(), i)) return i;
+	}
+	return -1;
+}
+
+function str idToClass(int id) {
+	if (id < 0) {
+		return "-";
+	}
+	return champions[id];
+}
+
+function int duelIndex(void) {
+	return duelIndexFor(playerNumber());
+}
+
+function int duelIndexFor(int pn) {
+	if (pn == playerNumberForDuelIndex(0)) {
+		return 0;
+	} else if (pn == playerNumberForDuelIndex(1)) {
+		return 1;
+	}
+	return -1000; // set to a stupid value to catch bugs
+}
+
+function int getPickedClass(int duelPlayer, int champIndex) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
+		return -100;
+	}
+	if (duelPlayer < 0 || duelPlayer >= 2) {
+		return -100;
+	}
+	return chosenClass[MAXMATES*duelPlayer + champIndex];
+}
+
+function void setPickedClass(int duelPlayer, int champIndex, int newClass) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
+		return;
+	}
+	if (duelPlayer < 0 || duelPlayer >= 2) {
+		return;
+	}
+	chosenClass[MAXMATES*duelPlayer + champIndex] = newClass;
+	if (IsNetworkGame() && consolePlayerNumber() == -1) {
+	    ACS_NamedExecuteAlways("QCD_setPickedClass_Client", 0, duelPlayer, champIndex, newClass);
+	}
+}
+
+function void setChampStatus(int duelPlayer, int champIndex, int newStatus) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
+		return;
+	}
+	if (duelPlayer < 0 || duelPlayer >= 2) {
+		return;
+	}
+	champStatus[champIndex][duelPlayer] = newStatus;
+	if (IsNetworkGame() && consolePlayerNumber() == -1) {
+	    ACS_NamedExecuteAlways("QCD_setChampStatus_Client", 0, duelPlayer, champIndex, newStatus);
+	}
+}
+
+function int getChampStatus(int duelPlayer, int champIndex) {
+	if (champIndex < 0 || champIndex >= MAXMATES) {
+		return -100;
+	}
+	if (duelPlayer < 0 || duelPlayer >= 2) {
+		return -100;
+	}
+	int status = champStatus[champIndex][duelPlayer];
+
+	if (STATUS_DEAD == status) return status;
+
+    if (getPickedClass(duelPlayer, champIndex) < 0) return STATUS_DEAD;
+
+    return status;
+}
+
+// ch is "Q" - not selected, 'B' - row selected or 'R' - champion selected
+function str championSprite(int index, str ch) {
+    return strparam(s:ch, s:championSprites[index]);
+}
+
+function int playerNumberForDuelIndex(int di) {
+    if (di > 1) return -1000;
+    return duelPlayers[di] - 1;
+}
+
+function int sign(int value) {
+    if (value > 0) {
+        return 1;
+    } else if (value < 0) {
+        return -1;
+    }
+    return 0;
+}
